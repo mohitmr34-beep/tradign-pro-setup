@@ -7,14 +7,14 @@ from ta.momentum import RSIIndicator
 st.set_page_config(page_title="AI Trading System", layout="wide")
 
 # =========================
-# SIDEBAR
+# SIDEBAR SETTINGS
 # =========================
 st.sidebar.title("⚙️ Settings")
 
-mode = st.sidebar.radio("Select Mode", ["Live Trading", "Backtest"])
+mode = st.sidebar.radio("Mode", ["Live Trading", "Backtest"])
 
 market = st.sidebar.selectbox(
-    "Select Market",
+    "Market",
     ["NIFTY", "BANKNIFTY", "CUSTOM"]
 )
 
@@ -23,11 +23,16 @@ if market == "NIFTY":
 elif market == "BANKNIFTY":
     symbol = "BANKBEES.NS"
 else:
-    symbol = st.sidebar.text_input("Enter Symbol", "RELIANCE.NS")
+    symbol = st.sidebar.text_input("Symbol", "RELIANCE.NS")
+
+timeframe = st.sidebar.selectbox(
+    "Timeframe",
+    ["5m", "15m", "1d"]
+)
 
 st.sidebar.markdown("---")
 st.sidebar.write("### 📊 Strategy")
-st.sidebar.write("• 9:20 Trap")
+st.sidebar.write("• 9:20 Trap Logic")
 st.sidebar.write("• 9:25 Breakout")
 st.sidebar.write("• AI Score")
 st.sidebar.write("• Hedge Mode")
@@ -36,64 +41,38 @@ st.sidebar.write("• Hedge Mode")
 # TITLE
 # =========================
 st.title("🤖 AI Trading System with Hedge Mode")
-st.subheader(f"{mode} | {symbol}")
+st.subheader(f"{mode} | {symbol} | {timeframe}")
 
 # =========================
-# DATA LOADERS
+# DATA LOADER
 # =========================
 @st.cache_data(ttl=60)
-def load_live(sym):
+def load_data(sym, tf, mode):
     try:
-        df = yf.download(sym, period="5d", interval="5m", progress=False)
-        if df is not None and not df.empty:
-            return df, "5m"
+        if mode == "Live Trading":
+            period = "5d"
+        else:
+            period = "1y" if tf == "1d" else "60d"
 
-        df = yf.download(sym, period="5d", interval="15m", progress=False)
-        if df is not None and not df.empty:
-            return df, "15m"
+        df = yf.download(sym, period=period, interval=tf, progress=False)
 
-        return None, None
+        if df is None or df.empty:
+            return None
+
+        return df
     except:
-        return None, None
+        return None
 
-
-@st.cache_data
-def load_backtest(sym):
-    try:
-        # Try intraday (60 days)
-        df = yf.download(sym, period="60d", interval="15m", progress=False)
-        if df is not None and not df.empty:
-            return df, "15m (60 days)"
-
-        # Fallback to daily (1 year)
-        df = yf.download(sym, period="1y", interval="1d", progress=False)
-        if df is not None and not df.empty:
-            return df, "1D (1 year)"
-
-        return None, None
-    except:
-        return None, None
-
-
-# =========================
-# LOAD DATA
-# =========================
-if mode == "Live Trading":
-    df, tf = load_live(symbol)
-else:
-    df, tf = load_backtest(symbol)
+df = load_data(symbol, timeframe, mode)
 
 if df is None or df.empty:
-    st.error("❌ Data not available from Yahoo")
+    st.error(f"❌ No data for {symbol} in {timeframe}")
     st.stop()
-
-if tf != "5m":
-    st.warning(f"⚠️ Using {tf} data")
 
 df.dropna(inplace=True)
 
 if len(df) < 20:
-    st.warning("Not enough data")
+    st.warning("⚠️ Not enough data")
     st.stop()
 
 st.write("🕒 Last Data:", df.index[-1])
@@ -103,7 +82,6 @@ st.write("🕒 Last Data:", df.index[-1])
 # =========================
 df['EMA50'] = df['Close'].ewm(span=50).mean()
 df['EMA200'] = df['Close'].ewm(span=200).mean()
-df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
 df['RSI'] = RSIIndicator(df['Close'], window=14).rsi()
 df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 
@@ -131,7 +109,6 @@ if mode == "Live Trading":
     break_low = c2['Low'] < c1['Low']
 
     rsi = c2['RSI']
-
     sideways = (45 < rsi < 55)
 
     score = 0
@@ -141,7 +118,7 @@ if mode == "Live Trading":
     score += 10 if vol1 else 0
     score += 10 if vol2 else 0
     score += 10 if break_high or break_low else 0
-    score += 10 if rsi else 0
+    score += 10
     score -= 30 if sideways else 0
 
     signal = "WAIT"
@@ -156,7 +133,7 @@ if mode == "Live Trading":
         else:
             signal = "HIGH PROBABILITY"
     elif score >= 65:
-        signal = "⚡ MODERATE"
+        signal = "⚡ MODERATE TRADE"
 
     col1, col2, col3 = st.columns(3)
     col1.metric("AI Score", score)
@@ -189,19 +166,15 @@ else:
 
         rsi = c2['RSI']
 
-        # BUY
+        # BUY LOGIC
         if uptrend and gap_down and c1_red and break_high and rsi > 50:
-            entry = c2['Close']
-            exit_price = df.iloc[i+1]['Close']
-            results.append(exit_price - entry)
+            results.append(df.iloc[i+1]['Close'] - c2['Close'])
 
-        # SELL
+        # SELL LOGIC
         elif downtrend and gap_up and c1_green and break_low and rsi < 50:
-            entry = c2['Close']
-            exit_price = df.iloc[i+1]['Close']
-            results.append(entry - exit_price)
+            results.append(c2['Close'] - df.iloc[i+1]['Close'])
 
-    if len(results) > 0:
+    if results:
         trades = len(results)
         wins = len([r for r in results if r > 0])
         win_rate = (wins / trades) * 100
