@@ -25,51 +25,85 @@ elif market == "BANKNIFTY":
 else:
     symbol = st.sidebar.text_input("Enter Symbol", "RELIANCE.NS")
 
+st.sidebar.markdown("---")
+st.sidebar.write("### 📊 Strategy")
+st.sidebar.write("• 9:20 Trap")
+st.sidebar.write("• 9:25 Breakout")
+st.sidebar.write("• AI Score")
+st.sidebar.write("• Hedge Mode")
+
 # =========================
 # TITLE
 # =========================
 st.title("🤖 AI Trading System with Hedge Mode")
-st.subheader(f"{mode} | Symbol: {symbol}")
+st.subheader(f"{mode} | {symbol}")
 
 # =========================
-# DATA LOADER
+# DATA LOADERS
 # =========================
 @st.cache_data(ttl=60)
 def load_live(sym):
     try:
         df = yf.download(sym, period="5d", interval="5m", progress=False)
-        if df.empty:
-            df = yf.download(sym, period="5d", interval="15m", progress=False)
-        return df
+        if df is not None and not df.empty:
+            return df, "5m"
+
+        df = yf.download(sym, period="5d", interval="15m", progress=False)
+        if df is not None and not df.empty:
+            return df, "15m"
+
+        return None, None
     except:
-        return None
+        return None, None
+
 
 @st.cache_data
 def load_backtest(sym):
-    return yf.download(sym, period="1y", interval="15m", progress=False)
+    try:
+        # Try intraday (60 days)
+        df = yf.download(sym, period="60d", interval="15m", progress=False)
+        if df is not None and not df.empty:
+            return df, "15m (60 days)"
+
+        # Fallback to daily (1 year)
+        df = yf.download(sym, period="1y", interval="1d", progress=False)
+        if df is not None and not df.empty:
+            return df, "1D (1 year)"
+
+        return None, None
+    except:
+        return None, None
+
 
 # =========================
-# LOAD BASED ON MODE
+# LOAD DATA
 # =========================
 if mode == "Live Trading":
-    df = load_live(symbol)
+    df, tf = load_live(symbol)
 else:
-    df = load_backtest(symbol)
+    df, tf = load_backtest(symbol)
 
 if df is None or df.empty:
-    st.error("❌ Data not available")
+    st.error("❌ Data not available from Yahoo")
     st.stop()
 
+if tf != "5m":
+    st.warning(f"⚠️ Using {tf} data")
+
 df.dropna(inplace=True)
+
+if len(df) < 20:
+    st.warning("Not enough data")
+    st.stop()
+
+st.write("🕒 Last Data:", df.index[-1])
 
 # =========================
 # INDICATORS
 # =========================
 df['EMA50'] = df['Close'].ewm(span=50).mean()
 df['EMA200'] = df['Close'].ewm(span=200).mean()
-
 df['VWAP'] = (df['Close'] * df['Volume']).cumsum() / df['Volume'].cumsum()
-
 df['RSI'] = RSIIndicator(df['Close'], window=14).rsi()
 df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 
@@ -77,10 +111,6 @@ df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 # 🔴 LIVE MODE
 # =========================
 if mode == "Live Trading":
-
-    if len(df) < 20:
-        st.warning("Not enough data")
-        st.stop()
 
     c1 = df.iloc[-2]
     c2 = df.iloc[-1]
@@ -183,7 +213,6 @@ else:
         col1.metric("Total Trades", trades)
         col2.metric("Win Rate %", round(win_rate, 2))
         col3.metric("Total Profit", round(profit, 2))
-
     else:
         st.warning("No trades found")
 
