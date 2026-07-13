@@ -18,10 +18,11 @@ market = st.sidebar.selectbox(
     ["NIFTY", "BANKNIFTY", "CUSTOM"]
 )
 
+# ✅ STABLE SYMBOLS (FIXED)
 if market == "NIFTY":
-    symbol = "NIFTYBEES.NS"
+    symbol = "^NSEI"
 elif market == "BANKNIFTY":
-    symbol = "BANKBEES.NS"
+    symbol = "^NSEBANK"
 else:
     symbol = st.sidebar.text_input("Symbol", "RELIANCE.NS")
 
@@ -44,42 +45,40 @@ st.title("🤖 AI Trading System with Hedge Mode")
 st.subheader(f"{mode} | {symbol} | {timeframe}")
 
 # =========================
-# DATA LOADER (FIXED)
+# DATA LOADER (FINAL FIX)
 # =========================
 @st.cache_data(ttl=60)
-def load_data(sym, tf, mode):
+def load_data(sym, tf):
     try:
-        # ===== PERIOD LOGIC =====
-        if mode == "Live Trading":
-            if tf == "1d":
-                period = "5d"
-            else:
-                period = "1d"
+        # ===== SMART PERIOD =====
+        if tf == "1d":
+            period = "1y"
+        elif tf == "15m":
+            period = "10d"
+        elif tf == "5m":
+            period = "5d"
         else:
-            if tf == "1d":
-                period = "6mo"
-            elif tf in ["5m", "15m"]:
-                period = "5d"
-            else:
-                period = "1mo"
+            period = "1mo"
 
         df = yf.download(sym, period=period, interval=tf, progress=False)
 
-        # ===== FALLBACK SYSTEM =====
+        # ===== MULTI FALLBACK =====
         if df is None or df.empty:
-            st.warning(f"⚠️ {sym} failed, switching to index fallback...")
+            st.warning(f"⚠️ {sym} failed. Trying fallback...")
 
-            fallback_map = {
-                "NIFTYBEES.NS": "^NSEI",
-                "BANKBEES.NS": "^NSEBANK"
-            }
+            fallback_symbols = [
+                "^NSEI",
+                "^NSEBANK",
+                "RELIANCE.NS"
+            ]
 
-            fallback = fallback_map.get(sym, "^NSEI")
+            for fb in fallback_symbols:
+                df = yf.download(fb, period=period, interval=tf, progress=False)
+                if df is not None and not df.empty:
+                    st.info(f"✅ Using fallback: {fb}")
+                    return df
 
-            df = yf.download(fallback, period=period, interval=tf, progress=False)
-
-            if df is None or df.empty:
-                return None
+            return None
 
         return df
 
@@ -88,17 +87,24 @@ def load_data(sym, tf, mode):
         return None
 
 
-df = load_data(symbol, timeframe, mode)
+# =========================
+# LOAD DATA
+# =========================
+df = load_data(symbol, timeframe)
 
-# ===== SAFETY CHECK =====
+# ===== SAFE HANDLING =====
 if df is None or df.empty:
-    st.error("❌ Data not available. Try different timeframe.")
+    st.warning("⚠️ Data not available. Try switching timeframe.")
     st.stop()
 
-df.dropna(inplace=True)
+df = df.dropna()
+
+# Fix Yahoo volume bug
+if "Volume" in df.columns:
+    df["Volume"] = df["Volume"].fillna(0)
 
 if len(df) < 50:
-    st.warning("⚠️ Not enough data for indicators")
+    st.warning("⚠️ Not enough candles for strategy")
     st.stop()
 
 st.write("🕒 Last Data:", df.index[-1])
