@@ -11,14 +11,14 @@ st.set_page_config(page_title="AI Trading System", layout="wide")
 # =========================
 st.sidebar.title("⚙️ Settings")
 
-index_option = st.sidebar.selectbox(
+market = st.sidebar.selectbox(
     "Select Market",
     ["NIFTY", "BANKNIFTY", "CUSTOM"]
 )
 
-if index_option == "NIFTY":
+if market == "NIFTY":
     symbol = "NIFTYBEES.NS"
-elif index_option == "BANKNIFTY":
+elif market == "BANKNIFTY":
     symbol = "BANKBEES.NS"
 else:
     symbol = st.sidebar.text_input("Enter Symbol", "RELIANCE.NS")
@@ -37,34 +37,45 @@ st.title("🤖 AI Trading System with Hedge Mode")
 st.subheader(f"Symbol: {symbol}")
 
 # =========================
-# LOAD DATA
+# LOAD DATA (ROBUST)
 # =========================
 @st.cache_data(ttl=60)
 def load_data(sym):
     try:
+        # Try 5m
         df = yf.download(sym, period="5d", interval="5m", progress=False)
-        if df.empty:
-            return None
-        return df
+        if df is not None and not df.empty:
+            return df, "5m"
+
+        # Fallback 15m
+        df = yf.download(sym, period="5d", interval="15m", progress=False)
+        if df is not None and not df.empty:
+            return df, "15m"
+
+        # Fallback daily
+        df = yf.download(sym, period="1mo", interval="1d", progress=False)
+        if df is not None and not df.empty:
+            return df, "1d"
+
+        return None, None
+
     except:
-        return None
+        return None, None
 
-df = load_data(symbol)
-
-# fallback if needed
-if df is None or df.empty:
-    st.warning("⚠️ Primary data failed. Trying fallback...")
-    df = load_data("NIFTYBEES.NS")
+df, timeframe = load_data(symbol)
 
 if df is None or df.empty:
-    st.error("❌ Data not available. Try later.")
+    st.error("❌ Data not available from Yahoo. Try during market hours.")
     st.stop()
+
+# =========================
+# SHOW DATA INFO
+# =========================
+if timeframe != "5m":
+    st.warning(f"⚠️ Using {timeframe} data (5m not available)")
 
 df.dropna(inplace=True)
 
-# =========================
-# DATA CHECK
-# =========================
 if len(df) < 20:
     st.warning("Not enough data yet.")
     st.stop()
@@ -87,36 +98,36 @@ df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 # =========================
 # LAST 2 CANDLES
 # =========================
-c920 = df.iloc[-2]
-c925 = df.iloc[-1]
+c1 = df.iloc[-2]
+c2 = df.iloc[-1]
 
 # =========================
 # CONDITIONS
 # =========================
-uptrend = c925['EMA50'] > c925['EMA200']
-downtrend = c925['EMA50'] < c925['EMA200']
+uptrend = c2['EMA50'] > c2['EMA200']
+downtrend = c2['EMA50'] < c2['EMA200']
 
-gap_up = c925['Open'] > c920['Close']
-gap_down = c925['Open'] < c920['Close']
+gap_up = c2['Open'] > c1['Close']
+gap_down = c2['Open'] < c1['Close']
 
-c920_red = c920['Close'] < c920['Open']
-c920_green = c920['Close'] > c920['Open']
+c1_red = c1['Close'] < c1['Open']
+c1_green = c1['Close'] > c1['Open']
 
-vol_spike_920 = c920['Volume'] > c920['Vol_Avg']
-vol_spike_925 = c925['Volume'] > c925['Vol_Avg']
+vol_spike_1 = c1['Volume'] > c1['Vol_Avg']
+vol_spike_2 = c2['Volume'] > c2['Vol_Avg']
 
-break_high = c925['High'] > c920['High']
-break_low = c925['Low'] < c920['Low']
+break_high = c2['High'] > c1['High']
+break_low = c2['Low'] < c1['Low']
 
-above_vwap = c925['Close'] > c925['VWAP']
-below_vwap = c925['Close'] < c925['VWAP']
+above_vwap = c2['Close'] > c2['VWAP']
+below_vwap = c2['Close'] < c2['VWAP']
 
-rsi_val = c925['RSI']
+rsi_val = c2['RSI']
 
 # =========================
 # SIDEWAYS
 # =========================
-sideways = (45 < rsi_val < 55) and abs(c925['EMA50'] - c925['EMA200']) < 1
+sideways = (45 < rsi_val < 55) and abs(c2['EMA50'] - c2['EMA200']) < 1
 
 # =========================
 # AI SCORE
@@ -125,28 +136,20 @@ score = 0
 
 if uptrend or downtrend:
     score += 20
-
 if gap_up or gap_down:
     score += 15
-
-if c920_red or c920_green:
+if c1_red or c1_green:
     score += 15
-
-if vol_spike_920:
+if vol_spike_1:
     score += 10
-
 if above_vwap or below_vwap:
     score += 10
-
 if rsi_val > 50 or rsi_val < 50:
     score += 10
-
 if break_high or break_low:
     score += 10
-
-if vol_spike_925:
+if vol_spike_2:
     score += 10
-
 if sideways:
     score -= 30
 
@@ -159,9 +162,9 @@ if sideways:
     signal = "🛡️ HEDGE MODE"
 
 elif score >= 80:
-    if uptrend and gap_down and c920_red and break_high:
+    if uptrend and gap_down and c1_red and break_high:
         signal = "🔥 STRONG BUY"
-    elif downtrend and gap_up and c920_green and break_low:
+    elif downtrend and gap_up and c1_green and break_low:
         signal = "🔥 STRONG SELL"
     else:
         signal = "HIGH PROBABILITY"
@@ -188,10 +191,10 @@ st.write({
     "Downtrend": downtrend,
     "Gap Up": gap_up,
     "Gap Down": gap_down,
-    "920 Red": c920_red,
-    "920 Green": c920_green,
-    "Vol Spike 920": vol_spike_920,
-    "Vol Spike 925": vol_spike_925,
+    "Candle Red": c1_red,
+    "Candle Green": c1_green,
+    "Vol Spike 1": vol_spike_1,
+    "Vol Spike 2": vol_spike_2,
     "Break High": break_high,
     "Break Low": break_low,
     "Above VWAP": above_vwap,
