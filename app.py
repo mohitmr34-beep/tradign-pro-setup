@@ -44,35 +44,61 @@ st.title("🤖 AI Trading System with Hedge Mode")
 st.subheader(f"{mode} | {symbol} | {timeframe}")
 
 # =========================
-# DATA LOADER
+# DATA LOADER (FIXED)
 # =========================
 @st.cache_data(ttl=60)
 def load_data(sym, tf, mode):
     try:
+        # ===== PERIOD LOGIC =====
         if mode == "Live Trading":
-            period = "5d"
+            if tf == "1d":
+                period = "5d"
+            else:
+                period = "1d"
         else:
-            period = "1y" if tf == "1d" else "60d"
+            if tf == "1d":
+                period = "6mo"
+            elif tf in ["5m", "15m"]:
+                period = "5d"
+            else:
+                period = "1mo"
 
         df = yf.download(sym, period=period, interval=tf, progress=False)
 
+        # ===== FALLBACK SYSTEM =====
         if df is None or df.empty:
-            return None
+            st.warning(f"⚠️ {sym} failed, switching to index fallback...")
+
+            fallback_map = {
+                "NIFTYBEES.NS": "^NSEI",
+                "BANKBEES.NS": "^NSEBANK"
+            }
+
+            fallback = fallback_map.get(sym, "^NSEI")
+
+            df = yf.download(fallback, period=period, interval=tf, progress=False)
+
+            if df is None or df.empty:
+                return None
 
         return df
-    except:
+
+    except Exception as e:
+        st.error(f"Error: {e}")
         return None
+
 
 df = load_data(symbol, timeframe, mode)
 
+# ===== SAFETY CHECK =====
 if df is None or df.empty:
-    st.error(f"❌ No data for {symbol} in {timeframe}")
+    st.error("❌ Data not available. Try different timeframe.")
     st.stop()
 
 df.dropna(inplace=True)
 
-if len(df) < 20:
-    st.warning("⚠️ Not enough data")
+if len(df) < 50:
+    st.warning("⚠️ Not enough data for indicators")
     st.stop()
 
 st.write("🕒 Last Data:", df.index[-1])
@@ -166,11 +192,9 @@ else:
 
         rsi = c2['RSI']
 
-        # BUY LOGIC
         if uptrend and gap_down and c1_red and break_high and rsi > 50:
             results.append(df.iloc[i+1]['Close'] - c2['Close'])
 
-        # SELL LOGIC
         elif downtrend and gap_up and c1_green and break_low and rsi < 50:
             results.append(c2['Close'] - df.iloc[i+1]['Close'])
 
