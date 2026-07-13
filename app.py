@@ -7,27 +7,37 @@ from ta.momentum import RSIIndicator
 st.set_page_config(page_title="AI Trading System", layout="wide")
 
 # =========================
-# TITLE
+# SIDEBAR
 # =========================
-st.title("🤖 AI Trading System with Hedge Mode")
+st.sidebar.title("⚙️ Settings")
 
-# =========================
-# INDEX SELECTOR
-# =========================
-index_option = st.selectbox(
+index_option = st.sidebar.selectbox(
     "Select Market",
     ["NIFTY", "BANKNIFTY", "CUSTOM"]
 )
 
 if index_option == "NIFTY":
-    symbol = "^NSEI"
+    symbol = "NIFTYBEES.NS"
 elif index_option == "BANKNIFTY":
-    symbol = "^NSEBANK"
+    symbol = "BANKBEES.NS"
 else:
-    symbol = st.text_input("Enter Custom Symbol", "RELIANCE.NS")
+    symbol = st.sidebar.text_input("Enter Symbol", "RELIANCE.NS")
+
+st.sidebar.markdown("---")
+st.sidebar.write("### 📊 Strategy")
+st.sidebar.write("• 9:20 Trap")
+st.sidebar.write("• 9:25 Breakout")
+st.sidebar.write("• AI Score")
+st.sidebar.write("• Hedge Mode")
 
 # =========================
-# LOAD DATA (SAFE)
+# TITLE
+# =========================
+st.title("🤖 AI Trading System with Hedge Mode")
+st.subheader(f"Symbol: {symbol}")
+
+# =========================
+# LOAD DATA
 # =========================
 @st.cache_data(ttl=60)
 def load_data(sym):
@@ -41,22 +51,24 @@ def load_data(sym):
 
 df = load_data(symbol)
 
+# fallback if needed
 if df is None or df.empty:
-    st.warning("⚠️ Data not available (market closed / Yahoo issue). Try again later.")
+    st.warning("⚠️ Primary data failed. Trying fallback...")
+    df = load_data("NIFTYBEES.NS")
+
+if df is None or df.empty:
+    st.error("❌ Data not available. Try later.")
     st.stop()
 
 df.dropna(inplace=True)
 
 # =========================
-# CHECK DATA LENGTH
+# DATA CHECK
 # =========================
 if len(df) < 20:
-    st.warning("Not enough data yet. Wait for market hours.")
+    st.warning("Not enough data yet.")
     st.stop()
 
-# =========================
-# SHOW LAST TIME
-# =========================
 st.write("🕒 Last Data Time:", df.index[-1])
 
 # =========================
@@ -73,7 +85,7 @@ df['RSI'] = rsi.rsi()
 df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 
 # =========================
-# LAST 2 CANDLES (APPROX)
+# LAST 2 CANDLES
 # =========================
 c920 = df.iloc[-2]
 c925 = df.iloc[-1]
@@ -102,7 +114,7 @@ below_vwap = c925['Close'] < c925['VWAP']
 rsi_val = c925['RSI']
 
 # =========================
-# SIDEWAYS DETECTION
+# SIDEWAYS
 # =========================
 sideways = (45 < rsi_val < 55) and abs(c925['EMA50'] - c925['EMA200']) < 1
 
@@ -139,7 +151,7 @@ if sideways:
     score -= 30
 
 # =========================
-# SIGNAL LOGIC
+# SIGNAL
 # =========================
 signal = "WAIT"
 
@@ -167,7 +179,7 @@ col2.metric("Signal", signal)
 col3.metric("RSI", round(rsi_val, 2))
 
 # =========================
-# CONDITIONS TABLE
+# CONDITIONS
 # =========================
 st.subheader("📊 Conditions")
 
