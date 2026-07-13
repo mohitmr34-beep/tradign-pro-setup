@@ -4,10 +4,16 @@ import numpy as np
 import yfinance as yf
 from ta.momentum import RSIIndicator
 
-st.set_page_config(page_title="AI Trading System", layout="wide")
+st.set_page_config(page_title="AI Trading System PRO", layout="wide")
 
 # =========================
-# SIDEBAR SETTINGS
+# GLOBAL CACHE
+# =========================
+if "last_df" not in st.session_state:
+    st.session_state.last_df = None
+
+# =========================
+# SIDEBAR
 # =========================
 st.sidebar.title("⚙️ Settings")
 
@@ -18,94 +24,94 @@ market = st.sidebar.selectbox(
     ["NIFTY", "BANKNIFTY", "CUSTOM"]
 )
 
-# ✅ STABLE SYMBOLS (FIXED)
-if market == "NIFTY":
-    symbol = "^NSEI"
-elif market == "BANKNIFTY":
-    symbol = "^NSEBANK"
-else:
-    symbol = st.sidebar.text_input("Symbol", "RELIANCE.NS")
-
 timeframe = st.sidebar.selectbox(
     "Timeframe",
     ["5m", "15m", "1d"]
 )
 
-st.sidebar.markdown("---")
-st.sidebar.write("### 📊 Strategy")
-st.sidebar.write("• 9:20 Trap Logic")
-st.sidebar.write("• 9:25 Breakout")
-st.sidebar.write("• AI Score")
-st.sidebar.write("• Hedge Mode")
+# =========================
+# SMART SYMBOL (KEY FIX)
+# =========================
+def get_symbol(market, timeframe):
+    if market == "NIFTY":
+        return "RELIANCE.NS" if timeframe != "1d" else "^NSEI"
+    elif market == "BANKNIFTY":
+        return "HDFCBANK.NS" if timeframe != "1d" else "^NSEBANK"
+    else:
+        return st.sidebar.text_input("Symbol", "RELIANCE.NS")
+
+symbol = get_symbol(market, timeframe)
 
 # =========================
 # TITLE
 # =========================
-st.title("🤖 AI Trading System with Hedge Mode")
+st.title("🤖 AI Trading System PRO")
 st.subheader(f"{mode} | {symbol} | {timeframe}")
 
 # =========================
-# DATA LOADER (FINAL FIX)
+# DATA ENGINE (PRO)
 # =========================
-@st.cache_data(ttl=60)
-def load_data(sym, tf):
+def get_period(tf):
+    if tf == "1d":
+        return "1y"
+    elif tf == "15m":
+        return "10d"
+    else:
+        return "5d"
+
+def fetch(sym, tf):
     try:
-        # ===== SMART PERIOD =====
-        if tf == "1d":
-            period = "1y"
-        elif tf == "15m":
-            period = "10d"
-        elif tf == "5m":
-            period = "5d"
-        else:
-            period = "1mo"
-
-        df = yf.download(sym, period=period, interval=tf, progress=False)
-
-        # ===== MULTI FALLBACK =====
-        if df is None or df.empty:
-            st.warning(f"⚠️ {sym} failed. Trying fallback...")
-
-            fallback_symbols = [
-                "^NSEI",
-                "^NSEBANK",
-                "RELIANCE.NS"
-            ]
-
-            for fb in fallback_symbols:
-                df = yf.download(fb, period=period, interval=tf, progress=False)
-                if df is not None and not df.empty:
-                    st.info(f"✅ Using fallback: {fb}")
-                    return df
-
-            return None
-
-        return df
-
-    except Exception as e:
-        st.error(f"Error: {e}")
+        return yf.download(sym, period=get_period(tf), interval=tf, progress=False)
+    except:
         return None
 
+def load_data(symbol, timeframe):
+
+    # 1. PRIMARY
+    df = fetch(symbol, timeframe)
+    if df is not None and not df.empty:
+        st.session_state.last_df = df
+        return df, "LIVE", symbol
+
+    # 2. FALLBACK
+    for fb in ["RELIANCE.NS", "HDFCBANK.NS"]:
+        df = fetch(fb, timeframe)
+        if df is not None and not df.empty:
+            st.session_state.last_df = df
+            return df, "FALLBACK", fb
+
+    # 3. CACHE
+    if st.session_state.last_df is not None:
+        return st.session_state.last_df, "CACHED", symbol
+
+    return None, "FAILED", symbol
+
+
+df, status, used_symbol = load_data(symbol, timeframe)
 
 # =========================
-# LOAD DATA
+# STATUS DISPLAY
 # =========================
-df = load_data(symbol, timeframe)
-
-# ===== SAFE HANDLING =====
-if df is None or df.empty:
-    st.warning("⚠️ Data not available. Try switching timeframe.")
+if status == "LIVE":
+    st.success(f"🟢 Live Data: {used_symbol}")
+elif status == "FALLBACK":
+    st.warning(f"🟡 Fallback Data: {used_symbol}")
+elif status == "CACHED":
+    st.info("🔵 Using Cached Data")
+else:
+    st.error("❌ No data available")
     st.stop()
 
+# =========================
+# CLEAN DATA
+# =========================
 df = df.dropna()
 
-# Fix Yahoo volume bug
 if "Volume" in df.columns:
     df["Volume"] = df["Volume"].fillna(0)
 
 if len(df) < 50:
-    st.warning("⚠️ Not enough candles for strategy")
-    st.stop()
+    st.warning("⚠️ Limited data")
 
 st.write("🕒 Last Data:", df.index[-1])
 
@@ -118,7 +124,7 @@ df['RSI'] = RSIIndicator(df['Close'], window=14).rsi()
 df['Vol_Avg'] = df['Volume'].rolling(5).mean()
 
 # =========================
-# 🔴 LIVE MODE
+# LIVE MODE
 # =========================
 if mode == "Live Trading":
 
@@ -173,7 +179,7 @@ if mode == "Live Trading":
     col3.metric("RSI", round(rsi, 2))
 
 # =========================
-# 📊 BACKTEST MODE
+# BACKTEST
 # =========================
 else:
 
